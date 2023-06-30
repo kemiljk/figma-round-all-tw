@@ -1,8 +1,11 @@
 {
-  "name": "Figma Plugin Tailwind Starter",
-  "id": "",
+  "name": "Round All",
+  "id": "939429933336921092",
   "api": "1.0.0",
   "main": "dist/code.js",
   "ui": "dist/ui.html",
+  "networkAccess": {
+    "allowedDomains": ["none"]
+  },
   "editorType": ["figma", "figjam"]
 }
