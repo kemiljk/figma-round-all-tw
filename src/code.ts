@@ -6,6 +6,9 @@ let propertiesToRound = ['paddingLeft', 'paddingRight', 'paddingTop', 'paddingBo
 figma.ui.onmessage = async (msg) => {
   if (msg.type === 'select-and-run') {
     await roundPixels().then(() => figma.notify('All cleaned up!'));
+    if (msg.checkboxOn === true) {
+      figma.closePlugin();
+    }
   }
   if (msg.type === 'run') {
     await selectAndRoundType().then(() => figma.notify('All cleaned up!'));
