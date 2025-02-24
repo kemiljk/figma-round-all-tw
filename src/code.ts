@@ -146,7 +146,7 @@ figma.ui.onmessage = async (msg) => {
           const previewChanges = await previewRoundingChanges(msg.roundingFactor, msg.options || DEFAULT_OPTIONS);
           figma.ui.postMessage({ type: "preview-results", changes: previewChanges });
         } else {
-          await roundPixels(msg.roundingFactor, msg.options || DEFAULT_OPTIONS, stats);
+          await roundPixels(msg.roundingFactor, msg.options || DEFAULT_OPTIONS, stats, msg.excludedNodes || []);
           figma.ui.postMessage({ type: "apply-complete", stats });
           figma.notify(`All cleaned up! Processed ${stats.nodesProcessed} nodes, rounded ${stats.propertiesRounded} properties`);
         }
@@ -157,7 +157,7 @@ figma.ui.onmessage = async (msg) => {
           const previewChanges = await previewRoundingChanges(msg.roundingFactor, msg.options || DEFAULT_OPTIONS, true);
           figma.ui.postMessage({ type: "preview-results", changes: previewChanges });
         } else {
-          await selectAndRoundType(msg.roundingFactor, msg.options || DEFAULT_OPTIONS, stats);
+          await selectAndRoundType(msg.roundingFactor, msg.options || DEFAULT_OPTIONS, stats, msg.excludedNodes || []);
           figma.ui.postMessage({ type: "apply-complete", stats });
           figma.notify(`Selection cleaned up! Processed ${stats.nodesProcessed} nodes, rounded ${stats.propertiesRounded} properties`);
         }
@@ -603,13 +603,14 @@ async function processNodeProperties(node: SceneNode, roundingFactor: number, op
 }
 
 // Process all nodes on the page
-async function roundPixels(roundingFactor: number = 1, options: RoundingOptions = DEFAULT_OPTIONS, stats: RoundingStats): Promise<string> {
+async function roundPixels(roundingFactor: number = 1, options: RoundingOptions = DEFAULT_OPTIONS, stats: RoundingStats, excludedNodes: string[] = []): Promise<string> {
   const processedNodes = new Set<string>();
+  const excludedSet = new Set(excludedNodes);
 
   const traverseChildren = async (node: SceneNode) => {
     try {
-      // Skip if already processed
-      if (processedNodes.has(node.id)) return;
+      // Skip if already processed or excluded
+      if (processedNodes.has(node.id) || excludedSet.has(node.id)) return;
       processedNodes.add(node.id);
 
       // Process the current node
@@ -619,7 +620,6 @@ async function roundPixels(roundingFactor: number = 1, options: RoundingOptions 
       if ("children" in node) {
         // For instances, we can only modify the instance properties, not its contents
         if (node.type === "INSTANCE") {
-          // Process instance properties but skip its contents
           console.log(`Skipping contents of instance "${node.name}" - instance contents are locked by default`);
           return;
         }
@@ -647,13 +647,14 @@ async function roundPixels(roundingFactor: number = 1, options: RoundingOptions 
 }
 
 // Process only selected nodes and their descendants
-async function selectAndRoundType(roundingFactor: number = 1, options: RoundingOptions = DEFAULT_OPTIONS, stats: RoundingStats): Promise<string> {
+async function selectAndRoundType(roundingFactor: number = 1, options: RoundingOptions = DEFAULT_OPTIONS, stats: RoundingStats, excludedNodes: string[] = []): Promise<string> {
   const processedNodes = new Set<string>();
+  const excludedSet = new Set(excludedNodes);
 
   const traverseChildren = async (node: SceneNode) => {
     try {
-      // Skip if already processed
-      if (processedNodes.has(node.id)) return;
+      // Skip if already processed or excluded
+      if (processedNodes.has(node.id) || excludedSet.has(node.id)) return;
       processedNodes.add(node.id);
 
       // Process the current node
@@ -663,7 +664,6 @@ async function selectAndRoundType(roundingFactor: number = 1, options: RoundingO
       if ("children" in node) {
         // For instances, we can only modify the instance properties, not its contents
         if (node.type === "INSTANCE") {
-          // Process instance properties but skip its contents
           console.log(`Skipping contents of instance "${node.name}" - instance contents are locked by default`);
           return;
         }

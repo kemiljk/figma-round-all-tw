@@ -2,7 +2,7 @@ import * as React from "react";
 import { createRoot } from "react-dom/client";
 import * as Tabs from "@radix-ui/react-tabs";
 import * as Label from "@radix-ui/react-label";
-import { ReloadIcon, ChevronDownIcon, MinusCircledIcon, StarFilledIcon, LightningBoltIcon } from "@radix-ui/react-icons";
+import { ReloadIcon, ChevronDownIcon, MinusCircledIcon, StarFilledIcon, LightningBoltIcon, PlusCircledIcon } from "@radix-ui/react-icons";
 import Checkbox from "./components/Checkbox";
 import Input from "./components/Input";
 import "./ui.css";
@@ -74,6 +74,9 @@ function App() {
 
   // Add state for custom presets
   const [customPresets, setCustomPresets] = React.useState<number[]>([]);
+
+  // Add state for excluded nodes
+  const [excludedNodes, setExcludedNodes] = React.useState<Set<string>>(new Set());
 
   // Load saved settings on mount
   React.useEffect(() => {
@@ -195,6 +198,20 @@ function App() {
     );
   };
 
+  // Add handler for toggling node exclusion
+  const handleToggleNodeExclusion = (nodeId: string) => {
+    setExcludedNodes((prev) => {
+      const newExcluded = new Set(prev);
+      if (newExcluded.has(nodeId)) {
+        newExcluded.delete(nodeId);
+      } else {
+        newExcluded.add(nodeId);
+      }
+      return newExcluded;
+    });
+  };
+
+  // Modify the apply handler to filter out excluded nodes
   const handleApply = (selectionOnly: boolean) => {
     if (selectionOnly) {
       setSelectionLoading(true);
@@ -207,6 +224,7 @@ function App() {
           type: selectionOnly ? "run" : "select-and-run",
           options,
           checkboxOn: options.closeOnComplete,
+          excludedNodes: Array.from(excludedNodes),
         },
       },
       "*"
@@ -384,11 +402,11 @@ function App() {
       {/* Preview Changes */}
       {previewChanges && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] flex flex-col">
+          <div className="bg-white rounded-lg w-full max-w-lg max-h-[80vh] flex flex-col">
             <div className="p-4 border-b border-figma-divider">
               <h2 className="text-sm font-medium text-figma-primary">Preview Changes</h2>
               <p className="text-xs text-figma-secondary mt-1">
-                {Object.keys(previewChanges.propertyChanges).length} nodes will be modified
+                {Object.keys(previewChanges.propertyChanges).length - excludedNodes.size} node{Object.keys(previewChanges.propertyChanges).length - excludedNodes.size === 1 ? "" : "s"} will be modified
                 {previewChanges.instancesSkipped > 0 && ` (${previewChanges.instancesSkipped} instances skipped)`}
               </p>
             </div>
@@ -396,23 +414,32 @@ function App() {
             <div className="overflow-y-auto p-4 space-y-4">
               {Object.keys(previewChanges.propertyChanges).map((nodeId) => {
                 const node = previewChanges.propertyChanges[nodeId];
+                const isExcluded = excludedNodes.has(nodeId);
+
                 return (
-                  <div key={nodeId} className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-figma-primary">{node.name}</span>
-                      <span className="text-xs text-figma-secondary">{node.type}</span>
-                    </div>
-                    <div className="space-y-1">
-                      {node.changes.map((change, index) => (
-                        <div key={index} className="text-xs flex items-center justify-between">
-                          <span className="text-figma-secondary">{change.property}</span>
-                          <div className="flex items-center space-x-2">
-                            <span className="text-figma-secondary">{formatChange(change.from)}</span>
-                            <span className="text-figma-secondary">→</span>
-                            <span className="text-figma-primary font-medium">{formatChange(change.to)}</span>
-                          </div>
+                  <div key={nodeId} className={`rounded-md transition-colors ${isExcluded && "opacity-50"}`}>
+                    <div className="flex items-start gap-2">
+                      <button onClick={() => handleToggleNodeExclusion(nodeId)} className={`text-figma-secondary hover:text-figma-primary transition-colors w-fit ${isExcluded && "text-figma-primary"}`} title={isExcluded ? "Include node" : "Exclude node"}>
+                        {isExcluded ? <PlusCircledIcon className="size-4" /> : <MinusCircledIcon className="size-4" />}
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-medium text-figma-primary truncate">{node.name}</span>
+                          <span className="text-xs text-figma-secondary shrink-0">{node.type}</span>
                         </div>
-                      ))}
+                        <div className="mt-1.5 space-y-1">
+                          {node.changes.map((change, index) => (
+                            <div key={index} className="text-xs flex items-center justify-between gap-2">
+                              <span className="text-figma-secondary truncate">{change.property}</span>
+                              <div className="flex items-center gap-1.5 shrink-0 tabular-nums">
+                                <span className="text-figma-secondary">{formatChange(change.from)}</span>
+                                <span className="text-figma-secondary">→</span>
+                                <span className="text-figma-primary font-medium">{formatChange(change.to)}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 );
