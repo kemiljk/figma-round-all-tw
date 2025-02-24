@@ -1,22 +1,25 @@
-import * as React from 'react';
-import * as Switch from '@radix-ui/react-switch';
+import * as React from "react";
+import * as CheckboxPrimitive from "@radix-ui/react-checkbox";
+import { CheckIcon } from "@radix-ui/react-icons";
 
-const Checkbox = ({ checkboxOn, setCheckboxOn }) => {
-  const handleCheckboxClick = () => {
-    setCheckboxOn(!checkboxOn);
-  };
+interface CheckboxProps {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}
 
+const Checkbox: React.FC<CheckboxProps> = ({ label, checked, onChange }) => {
   return (
-    <form>
-      <div className='flex items-center w-full justify-between'>
-        <label className='text-figma-primary text-xs leading-none pr-4' htmlFor='close-on-completion'>
-          Close on completion
-        </label>
-        <Switch.Root className='w-[42px] h-[25px] bg-figma-tertiaryBg rounded-full relative data-[state=checked]:bg-figma-blue outline-none cursor-default' id='close-on-completion' checked={checkboxOn} onCheckedChange={handleCheckboxClick}>
-          <Switch.Thumb className='block w-[21px] h-[21px] bg-white rounded-full shadow-[0_2px_2px] transition-transform duration-100 translate-x-0.5 will-change-transform data-[state=checked]:translate-x-[19px]' />
-        </Switch.Root>
-      </div>
-    </form>
+    <div className="flex items-center space-x-2">
+      <CheckboxPrimitive.Root id={label} checked={checked} onCheckedChange={onChange} className="CheckboxRoot">
+        <CheckboxPrimitive.Indicator className="CheckboxIndicator">
+          <CheckIcon className="h-3 w-3" />
+        </CheckboxPrimitive.Indicator>
+      </CheckboxPrimitive.Root>
+      <label htmlFor={label} className="text-xs leading-none text-figma-primary cursor-pointer">
+        {label}
+      </label>
+    </div>
   );
 };
 

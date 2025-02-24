@@ -18,10 +18,11 @@
     --text-figma-brand: var(--figma-color-text-brand);
     --border-figma: var(--figma-color-border);
     --icon-figma: var(--figma-color-icon);
+    --action-buttons-height: 120px;
   }
   body {
     background-color: var(--figma-color-bg);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
   }
 }
 
@@ -33,6 +34,7 @@
     border: none;
     margin: 0;
     width: 100%;
+    border-radius: 12px;
     overflow: visible;
     background: transparent;
     /* inherit font & color from ancestor */
@@ -45,6 +47,7 @@
     -moz-osx-font-smoothing: inherit;
     /* Corrects inability to style clickable `input` types in iOS */
     -webkit-appearance: none;
+    appearance: none;
   }
 
   p {
@@ -54,10 +57,9 @@
 
   .primary {
     background-color: var(--figma-color-bg-brand);
-    color: var(--figma-color-text);
+    color: white;
     height: 40px;
     font-weight: 600;
-    border-radius: 8px;
     box-shadow: none;
     outline: none;
     border: none;
@@ -66,11 +68,10 @@
     margin-left: 0.25rem;
   }
   .secondary {
-    background-color: var(--figma-color-bg-tertiary);
+    @apply bg-figma-secondaryBg;
     color: var(--figma-color-text-secondary);
     height: 40px;
     font-weight: 500;
-    border-radius: 8px;
     box-shadow: none;
     outline: none;
     transition: all 0.1s ease-in-out;
@@ -101,4 +102,98 @@
     background-color: var(--figma-color-bg-brand-hover);
     color: var(--figma-color-bg);
   }
+}
+
+/* Global focus styles */
+:focus-visible {
+  outline: 2px solid #18a0fb !important;
+  outline-offset: -1px;
+}
+
+/* Radix UI Tabs styles */
+.TabsList {
+  @apply sticky top-0 bg-figma-bg z-10 border-b border-figma-border;
+}
+
+.TabsTrigger {
+  @apply px-4 py-2 text-xs text-figma-secondary border-b-2 border-transparent transition-colors;
+}
+
+.TabsTrigger[data-state="active"] {
+  @apply text-figma-primary border-figma-blue;
+}
+
+.TabsContent {
+  @apply outline-none;
+}
+
+/* Radix UI Checkbox styles */
+.CheckboxRoot {
+  @apply h-4 w-4 rounded bg-figma-secondaryBg border border-figma-divider hover:bg-figma-tertiaryBg data-[state=checked]:bg-figma-blue data-[state=checked]:border-figma-blue transition-colors;
+}
+
+.CheckboxIndicator {
+  @apply flex items-center justify-center text-white;
+}
+
+/* Input styles */
+.input {
+  @apply inline-flex h-8 w-full appearance-none items-center justify-center rounded-md bg-figma-secondaryBg px-3 text-xs leading-none text-figma-primary outline-none focus:outline-figma-blue disabled:cursor-not-allowed disabled:text-figma-secondary;
+}
+
+/* Button styles */
+.button-primary {
+  @apply h-8 px-3 text-xs bg-figma-blue text-white rounded hover:bg-figma-hoverBlue disabled:opacity-50 transition-colors;
+}
+
+.button-secondary {
+  @apply h-8 px-3 text-xs text-figma-blue border border-figma-blue rounded hover:bg-figma-hoverBg disabled:opacity-50 transition-colors;
+}
+
+/* Progress bar styles */
+.progress-bar {
+  @apply absolute bottom-0 left-0 right-0 h-0.5 bg-figma-secondaryBg overflow-hidden;
+}
+
+.progress-bar-indicator {
+  @apply h-full bg-figma-blue transition-all duration-300;
+}
+
+/* Stats panel styles */
+.stats-panel {
+  @apply bg-figma-secondaryBg p-3 rounded space-y-1;
+}
+
+.stats-row {
+  @apply flex justify-between text-xs;
+}
+
+.stats-label {
+  @apply text-figma-secondary;
+}
+
+.stats-value {
+  @apply text-figma-primary;
+}
+
+/* Action buttons container */
+.action-buttons-container {
+  @apply fixed bottom-0 left-0 right-0 bg-figma-bg border-t border-figma-border p-4 space-y-2;
+  height: var(--action-buttons-height);
+}
+
+.content-with-footer {
+  @apply p-4 space-y-6;
+  padding-bottom: calc(var(--action-buttons-height) + 16px);
+}
+
+/* Hide number input spinners */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield; /* Firefox */
 }
