@@ -37,7 +37,7 @@ const DEFAULT_OPTIONS: RoundingOptions = {
   roundVectors: true,
   preserveProportions: true,
   roundingStrategy: "round",
-  ignoreTypes: [],
+  ignoreTypes: ["GROUP"],
   roundingFactorByProperty: {
     dimensions: 8,
     fontSize: 2,
@@ -187,6 +187,89 @@ figma.ui.onmessage = async (msg) => {
       case "save-custom-presets":
         await figma.clientStorage.setAsync("customPresets", msg.presets);
         break;
+
+      case "highlight-node":
+        // Remove any existing highlight
+        const existingHighlight = figma.currentPage.findChild((node) => node.name === "Temporary Highlight");
+        if (existingHighlight) {
+          existingHighlight.remove();
+        }
+
+        const nodeToHighlight = await figma.getNodeByIdAsync(msg.nodeId);
+        if (nodeToHighlight) {
+          try {
+            // Create a temporary highlight rectangle
+            const highlightRect = figma.createRectangle();
+            highlightRect.name = "Temporary Highlight";
+
+            // Get the absolute position and dimensions
+            let bounds;
+            if (nodeToHighlight.type === "GROUP") {
+              // For groups, get the union of all children's bounds
+              const group = nodeToHighlight as GroupNode;
+              let minX = Infinity,
+                minY = Infinity;
+              let maxX = -Infinity,
+                maxY = -Infinity;
+
+              const processNode = (node: SceneNode) => {
+                if ("absoluteBoundingBox" in node && node.absoluteBoundingBox) {
+                  const box = node.absoluteBoundingBox;
+                  minX = Math.min(minX, box.x);
+                  minY = Math.min(minY, box.y);
+                  maxX = Math.max(maxX, box.x + box.width);
+                  maxY = Math.max(maxY, box.y + box.height);
+                }
+                if ("children" in node) {
+                  node.children.forEach(processNode);
+                }
+              };
+
+              processNode(group);
+              bounds = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+            } else if ("absoluteBoundingBox" in nodeToHighlight && nodeToHighlight.absoluteBoundingBox) {
+              // For other nodes, use their absolute bounding box
+              bounds = nodeToHighlight.absoluteBoundingBox;
+            }
+
+            if (bounds) {
+              // Position and size the highlight
+              highlightRect.x = bounds.x;
+              highlightRect.y = bounds.y;
+              highlightRect.resize(bounds.width, bounds.height);
+
+              // Style the highlight
+              highlightRect.fills = [
+                {
+                  type: "SOLID",
+                  color: { r: 1, g: 0.847, b: 0 }, // Figma's yellow highlight color
+                  opacity: 0.3,
+                },
+              ];
+
+              // Add to the page at the top level
+              figma.currentPage.appendChild(highlightRect);
+
+              // Lock the highlight to prevent interaction
+              highlightRect.locked = true;
+
+              // Zoom to the node
+              figma.viewport.scrollAndZoomIntoView([nodeToHighlight]);
+            }
+          } catch (e) {
+            console.error("Error highlighting node:", e);
+            // If highlighting fails, just zoom to the node
+            figma.viewport.scrollAndZoomIntoView([nodeToHighlight]);
+          }
+        }
+        break;
+
+      case "remove-highlight":
+        const highlightToRemove = figma.currentPage.findChild((node) => node.name === "Temporary Highlight");
+        if (highlightToRemove) {
+          highlightToRemove.remove();
+        }
+        break;
     }
 
     if (msg.checkboxOn) {
@@ -304,6 +387,11 @@ async function previewRoundingChanges(roundingFactor: number, options: RoundingO
       return;
     }
 
+    // Skip vector nodes if roundVectors is disabled
+    if (!options.roundVectors && (node.type === "VECTOR" || node.type === "BOOLEAN_OPERATION" || node.type === "STAR" || node.type === "LINE" || node.type === "ELLIPSE" || node.type === "POLYGON")) {
+      return;
+    }
+
     // Skip instances if not detaching
     if (node.type === "INSTANCE" && !options.detachInstances) {
       changes.instancesSkipped++;
@@ -343,38 +431,43 @@ async function previewRoundingChanges(roundingFactor: number, options: RoundingO
 
     // Preview size properties
     if ("width" in node && "height" in node) {
-      if (options.preserveProportions) {
-        const [newWidth, newHeight] = preserveProportions(node.width, node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
-        if (newWidth !== node.width) {
-          changes.propertyChanges[node.id].changes.push({
-            property: "width",
-            from: node.width,
-            to: newWidth,
-          });
-        }
-        if (newHeight !== node.height) {
-          changes.propertyChanges[node.id].changes.push({
-            property: "height",
-            from: node.height,
-            to: newHeight,
-          });
-        }
+      // Skip resizing for vector nodes if roundVectors is disabled
+      if (!options.roundVectors && (node.type === "VECTOR" || node.type === "BOOLEAN_OPERATION" || node.type === "STAR" || node.type === "LINE" || node.type === "ELLIPSE" || node.type === "POLYGON")) {
+        // Skip resizing for vector types
       } else {
-        const newWidth = applyRoundingStrategy(node.width, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
-        const newHeight = applyRoundingStrategy(node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
-        if (newWidth !== node.width) {
-          changes.propertyChanges[node.id].changes.push({
-            property: "width",
-            from: node.width,
-            to: newWidth,
-          });
-        }
-        if (newHeight !== node.height) {
-          changes.propertyChanges[node.id].changes.push({
-            property: "height",
-            from: node.height,
-            to: newHeight,
-          });
+        if (options.preserveProportions) {
+          const [newWidth, newHeight] = preserveProportions(node.width, node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+          if (newWidth !== node.width) {
+            changes.propertyChanges[node.id].changes.push({
+              property: "width",
+              from: node.width,
+              to: newWidth,
+            });
+          }
+          if (newHeight !== node.height) {
+            changes.propertyChanges[node.id].changes.push({
+              property: "height",
+              from: node.height,
+              to: newHeight,
+            });
+          }
+        } else {
+          const newWidth = applyRoundingStrategy(node.width, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+          const newHeight = applyRoundingStrategy(node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+          if (newWidth !== node.width) {
+            changes.propertyChanges[node.id].changes.push({
+              property: "width",
+              from: node.width,
+              to: newWidth,
+            });
+          }
+          if (newHeight !== node.height) {
+            changes.propertyChanges[node.id].changes.push({
+              property: "height",
+              from: node.height,
+              to: newHeight,
+            });
+          }
         }
       }
     }
@@ -474,13 +567,25 @@ async function previewRoundingChanges(roundingFactor: number, options: RoundingO
 // Update processNodeProperties to use the new options
 async function processNodeProperties(node: SceneNode, roundingFactor: number, options: RoundingOptions, stats: RoundingStats) {
   try {
-    // Skip ignored node types
+    // Skip ignored node types with warning for groups
     if (options.ignoreTypes && options.ignoreTypes.indexOf(node.type) !== -1) {
+      if (node.type === "GROUP") {
+        console.log(`Skipping group "${node.name}" - Groups are excluded by default to prevent scaling issues with children`);
+      }
+      return;
+    }
+
+    // Skip vector nodes if roundVectors is disabled
+    if (!options.roundVectors && (node.type === "VECTOR" || node.type === "BOOLEAN_OPERATION" || node.type === "STAR" || node.type === "LINE" || node.type === "ELLIPSE" || node.type === "POLYGON")) {
+      console.log(`Skipping vector node "${node.name}" - Vector rounding is disabled`);
       return;
     }
 
     // Track stats
     stats.nodesProcessed++;
+
+    // Check if node has auto layout
+    const hasAutoLayout = "layoutMode" in node && node.layoutMode !== "NONE";
 
     // Basic properties that most nodes have
     if ("x" in node) {
@@ -502,20 +607,143 @@ async function processNodeProperties(node: SceneNode, roundingFactor: number, op
 
     // Size properties with proportion preservation
     if ("resize" in node && "width" in node && "height" in node) {
-      if (options.preserveProportions) {
-        const [newWidth, newHeight] = preserveProportions(node.width, node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
-        if (newWidth !== node.width || newHeight !== node.height) {
-          node.resize(newWidth, newHeight);
-          stats.propertiesRounded += 2;
-          stats.modifiedProperties.add("dimensions");
+      // Skip resizing for vector nodes if roundVectors is disabled
+      if (!options.roundVectors && (node.type === "VECTOR" || node.type === "BOOLEAN_OPERATION" || node.type === "STAR" || node.type === "LINE" || node.type === "ELLIPSE" || node.type === "POLYGON")) {
+        // Skip resizing for vector types
+      } else {
+        // For text nodes, respect text auto-sizing settings
+        if (node.type === "TEXT") {
+          const textNode = node as TextNode;
+          // Only modify width if it's not in auto-width mode
+          if (!textNode.autoRename && textNode.textAutoResize !== "WIDTH_AND_HEIGHT" && textNode.textAutoResize !== "HEIGHT") {
+            const newWidth = applyRoundingStrategy(node.width, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+            if (newWidth !== node.width) {
+              node.resize(newWidth, node.height);
+              stats.propertiesRounded++;
+              stats.modifiedProperties.add("width");
+            }
+          }
+          // Only modify height if it's in fixed height mode
+          if (textNode.textAutoResize === "NONE") {
+            const newHeight = applyRoundingStrategy(node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+            if (newHeight !== node.height) {
+              node.resize(node.width, newHeight);
+              stats.propertiesRounded++;
+              stats.modifiedProperties.add("height");
+            }
+          }
+        }
+        // For auto layout containers, only modify fixed dimensions
+        else if (hasAutoLayout) {
+          const frame = node as FrameNode;
+          if (frame.primaryAxisSizingMode === "FIXED" && frame.layoutMode === "HORIZONTAL") {
+            const newWidth = applyRoundingStrategy(node.width, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+            if (newWidth !== node.width) {
+              node.resize(newWidth, node.height);
+              stats.propertiesRounded++;
+              stats.modifiedProperties.add("width");
+            }
+          }
+          if (frame.counterAxisSizingMode === "FIXED" && frame.layoutMode === "HORIZONTAL") {
+            const newHeight = applyRoundingStrategy(node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+            if (newHeight !== node.height) {
+              node.resize(node.width, newHeight);
+              stats.propertiesRounded++;
+              stats.modifiedProperties.add("height");
+            }
+          }
+          if (frame.primaryAxisSizingMode === "FIXED" && frame.layoutMode === "VERTICAL") {
+            const newHeight = applyRoundingStrategy(node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+            if (newHeight !== node.height) {
+              node.resize(node.width, newHeight);
+              stats.propertiesRounded++;
+              stats.modifiedProperties.add("height");
+            }
+          }
+          if (frame.counterAxisSizingMode === "FIXED" && frame.layoutMode === "VERTICAL") {
+            const newWidth = applyRoundingStrategy(node.width, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+            if (newWidth !== node.width) {
+              node.resize(newWidth, node.height);
+              stats.propertiesRounded++;
+              stats.modifiedProperties.add("width");
+            }
+          }
+        } else {
+          // For non-auto layout nodes, proceed with normal resizing
+          if (options.preserveProportions) {
+            const [newWidth, newHeight] = preserveProportions(node.width, node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+            if (newWidth !== node.width || newHeight !== node.height) {
+              node.resize(newWidth, newHeight);
+              stats.propertiesRounded += 2;
+              stats.modifiedProperties.add("dimensions");
+            }
+          } else {
+            const newWidth = applyRoundingStrategy(node.width, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+            const newHeight = applyRoundingStrategy(node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+            if (newWidth !== node.width || newHeight !== node.height) {
+              node.resize(newWidth, newHeight);
+              stats.propertiesRounded += 2;
+              stats.modifiedProperties.add("dimensions");
+            }
+          }
+        }
+      }
+    }
+
+    // Auto layout specific properties
+    if (hasAutoLayout) {
+      const frame = node as FrameNode;
+      // Only round padding if it's explicitly set
+      if (frame.paddingLeft !== undefined && frame.paddingLeft === frame.paddingRight && frame.paddingLeft === frame.paddingTop && frame.paddingLeft === frame.paddingBottom) {
+        const newPadding = applyRoundingStrategy(frame.paddingLeft, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+        if (newPadding !== frame.paddingLeft) {
+          frame.paddingLeft = frame.paddingRight = frame.paddingTop = frame.paddingBottom = newPadding;
+          stats.propertiesRounded++;
+          stats.modifiedProperties.add("padding");
         }
       } else {
-        const newWidth = applyRoundingStrategy(node.width, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
-        const newHeight = applyRoundingStrategy(node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
-        if (newWidth !== node.width || newHeight !== node.height) {
-          node.resize(newWidth, newHeight);
-          stats.propertiesRounded += 2;
-          stats.modifiedProperties.add("dimensions");
+        // Handle individual padding values
+        if (frame.paddingLeft !== undefined) {
+          const newPaddingLeft = applyRoundingStrategy(frame.paddingLeft, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+          if (newPaddingLeft !== frame.paddingLeft) {
+            frame.paddingLeft = newPaddingLeft;
+            stats.propertiesRounded++;
+            stats.modifiedProperties.add("paddingLeft");
+          }
+        }
+        if (frame.paddingRight !== undefined) {
+          const newPaddingRight = applyRoundingStrategy(frame.paddingRight, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+          if (newPaddingRight !== frame.paddingRight) {
+            frame.paddingRight = newPaddingRight;
+            stats.propertiesRounded++;
+            stats.modifiedProperties.add("paddingRight");
+          }
+        }
+        if (frame.paddingTop !== undefined) {
+          const newPaddingTop = applyRoundingStrategy(frame.paddingTop, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+          if (newPaddingTop !== frame.paddingTop) {
+            frame.paddingTop = newPaddingTop;
+            stats.propertiesRounded++;
+            stats.modifiedProperties.add("paddingTop");
+          }
+        }
+        if (frame.paddingBottom !== undefined) {
+          const newPaddingBottom = applyRoundingStrategy(frame.paddingBottom, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+          if (newPaddingBottom !== frame.paddingBottom) {
+            frame.paddingBottom = newPaddingBottom;
+            stats.propertiesRounded++;
+            stats.modifiedProperties.add("paddingBottom");
+          }
+        }
+      }
+
+      // Item spacing
+      if (frame.itemSpacing !== undefined) {
+        const newItemSpacing = applyRoundingStrategy(frame.itemSpacing, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+        if (newItemSpacing !== frame.itemSpacing) {
+          frame.itemSpacing = newItemSpacing;
+          stats.propertiesRounded++;
+          stats.modifiedProperties.add("itemSpacing");
         }
       }
     }
@@ -607,6 +835,18 @@ async function roundPixels(roundingFactor: number = 1, options: RoundingOptions 
   const processedNodes = new Set<string>();
   const excludedSet = new Set(excludedNodes);
 
+  // Get total count first - for document mode, use all nodes
+  const allNodes = figma.currentPage.findAll();
+  const totalNodes = allNodes.length;
+  let processedCount = 0;
+
+  // Send initial progress
+  figma.ui.postMessage({
+    type: "progress-update",
+    progress: 0,
+    phase: "analyzing",
+  });
+
   const traverseChildren = async (node: SceneNode) => {
     try {
       // Skip if already processed or excluded
@@ -615,6 +855,14 @@ async function roundPixels(roundingFactor: number = 1, options: RoundingOptions 
 
       // Process the current node
       await processNodeProperties(node, roundingFactor, options, stats);
+
+      processedCount++;
+      // Send progress update
+      figma.ui.postMessage({
+        type: "progress-update",
+        progress: processedCount / totalNodes,
+        phase: "processing",
+      });
 
       // Handle children
       if ("children" in node) {
@@ -635,10 +883,17 @@ async function roundPixels(roundingFactor: number = 1, options: RoundingOptions 
   };
 
   try {
-    const allNodes = figma.currentPage.findAll();
     for (const node of allNodes) {
       await traverseChildren(node);
     }
+
+    // Send completion progress
+    figma.ui.postMessage({
+      type: "progress-update",
+      progress: 1,
+      phase: "complete",
+    });
+
     return "Done!";
   } catch (error) {
     console.error("Error in roundPixels:", error);
@@ -651,6 +906,28 @@ async function selectAndRoundType(roundingFactor: number = 1, options: RoundingO
   const processedNodes = new Set<string>();
   const excludedSet = new Set(excludedNodes);
 
+  const selection = figma.currentPage.selection;
+
+  // Calculate total nodes for selection mode by counting each selected node and its descendants
+  let totalNodes = 0;
+  for (const node of selection) {
+    // Count the node itself
+    totalNodes++;
+    // Count all descendants if it's a container
+    if ("children" in node) {
+      totalNodes += node.findAll().length;
+    }
+  }
+
+  let processedCount = 0;
+
+  // Send initial progress
+  figma.ui.postMessage({
+    type: "progress-update",
+    progress: 0,
+    phase: "analyzing",
+  });
+
   const traverseChildren = async (node: SceneNode) => {
     try {
       // Skip if already processed or excluded
@@ -659,6 +936,14 @@ async function selectAndRoundType(roundingFactor: number = 1, options: RoundingO
 
       // Process the current node
       await processNodeProperties(node, roundingFactor, options, stats);
+
+      processedCount++;
+      // Send progress update
+      figma.ui.postMessage({
+        type: "progress-update",
+        progress: processedCount / totalNodes,
+        phase: "processing",
+      });
 
       // Handle children
       if ("children" in node) {
@@ -679,7 +964,6 @@ async function selectAndRoundType(roundingFactor: number = 1, options: RoundingO
   };
 
   try {
-    const selection = figma.currentPage.selection;
     if (selection.length === 0) {
       figma.notify("Please select at least one element");
       return "No selection";
@@ -688,6 +972,14 @@ async function selectAndRoundType(roundingFactor: number = 1, options: RoundingO
     for (const node of selection) {
       await traverseChildren(node);
     }
+
+    // Send completion progress
+    figma.ui.postMessage({
+      type: "progress-update",
+      progress: 1,
+      phase: "complete",
+    });
+
     return "Done!";
   } catch (error) {
     console.error("Error in selectAndRoundType:", error);

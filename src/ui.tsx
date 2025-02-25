@@ -53,7 +53,7 @@ function App() {
   const [options, setOptions] = React.useState<RoundingOptions>({
     detachInstances: false,
     roundEffects: true,
-    roundVectors: true,
+    roundVectors: false,
     preserveProportions: true,
     roundingStrategy: "round",
     closeOnComplete: false,
@@ -69,14 +69,42 @@ function App() {
   const [previewLoading, setPreviewLoading] = React.useState(false);
   const [selectionLoading, setSelectionLoading] = React.useState(false);
   const [documentLoading, setDocumentLoading] = React.useState(false);
+  const [progress, setProgress] = React.useState(0);
+  const [progressPhase, setProgressPhase] = React.useState<"analyzing" | "processing" | "complete" | null>(null);
   const [activeTab, setActiveTab] = React.useState("main");
   const [previewChanges, setPreviewChanges] = React.useState<PreviewChanges | null>(null);
+  const [searchQuery, setSearchQuery] = React.useState("");
 
   // Add state for custom presets
   const [customPresets, setCustomPresets] = React.useState<number[]>([]);
 
   // Add state for excluded nodes
   const [excludedNodes, setExcludedNodes] = React.useState<Set<string>>(new Set());
+
+  // Add handler for highlighting nodes
+  const handleHighlightNode = (nodeId: string) => {
+    parent.postMessage(
+      {
+        pluginMessage: {
+          type: "highlight-node",
+          nodeId,
+        },
+      },
+      "*"
+    );
+  };
+
+  // Add handler for removing highlight
+  const removeHighlight = () => {
+    parent.postMessage(
+      {
+        pluginMessage: {
+          type: "remove-highlight",
+        },
+      },
+      "*"
+    );
+  };
 
   // Load saved settings on mount
   React.useEffect(() => {
@@ -100,14 +128,22 @@ function App() {
       const message = event.data.pluginMessage;
 
       switch (message.type) {
+        case "progress-update":
+          setProgress(message.progress);
+          setProgressPhase(message.phase);
+          break;
         case "preview-complete":
           setPreviewLoading(false);
+          setProgress(0);
+          setProgressPhase(null);
           setStats(message.stats);
           setPreviewChanges(message.changes);
           break;
         case "apply-complete":
           setSelectionLoading(false);
           setDocumentLoading(false);
+          setProgress(0);
+          setProgressPhase(null);
           setStats(message.stats);
           setPreviewChanges(null);
           break;
@@ -115,6 +151,8 @@ function App() {
           setPreviewLoading(false);
           setSelectionLoading(false);
           setDocumentLoading(false);
+          setProgress(0);
+          setProgressPhase(null);
           console.error("Preview error:", message.error);
           figma.notify("Error whilst analysing changes: " + message.error);
           break;
@@ -198,8 +236,9 @@ function App() {
     );
   };
 
-  // Add handler for toggling node exclusion
+  // Modify the handleToggleNodeExclusion to remove highlight
   const handleToggleNodeExclusion = (nodeId: string) => {
+    removeHighlight();
     setExcludedNodes((prev) => {
       const newExcluded = new Set(prev);
       if (newExcluded.has(nodeId)) {
@@ -258,7 +297,7 @@ function App() {
                     <button
                       onClick={() => handlePresetClick(factor)}
                       className={`w-full px-3 py-1.5 text-sm font-medium rounded-md transition-colors
-                        ${options.roundingFactorByProperty.dimensions === factor ? "bg-[#18A0FB] text-white hover:bg-[#0D8DE3]" : "bg-[#F5F5F5] text-[#333333] hover:bg-[#E5E5E5]"}`}
+                        ${options.roundingFactorByProperty.dimensions === factor ? "bg-figma-blue text-white hover:bg-figma-blue/90" : "bg-figma-secondaryBg text-figma-primary hover:bg-figma-bg-selected"}`}
                     >
                       {factor}px Grid
                     </button>
@@ -370,7 +409,7 @@ function App() {
             onClick={() => handleApply(true)}
             disabled={previewLoading || selectionLoading || documentLoading}
             className="flex-1 h-10 px-4 text-sm font-medium rounded-md transition-colors
-              bg-[#18A0FB] text-white hover:bg-[#0D8DE3] disabled:opacity-50"
+              bg-figma-blue text-white hover:bg-figma-blue/90 disabled:opacity-50"
           >
             {selectionLoading ? (
               <span className="flex items-center justify-center gap-2">
@@ -385,7 +424,7 @@ function App() {
             onClick={() => handleApply(false)}
             disabled={previewLoading || selectionLoading || documentLoading}
             className="flex-1 h-10 px-4 text-sm font-medium rounded-md transition-colors
-              bg-[#18A0FB] text-white hover:bg-[#0D8DE3] disabled:opacity-50"
+              bg-figma-blue text-white hover:bg-figma-blue/90 disabled:opacity-50"
           >
             {documentLoading ? (
               <span className="flex items-center justify-center gap-2">
@@ -402,66 +441,84 @@ function App() {
       {/* Preview Changes */}
       {previewChanges && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg w-full max-w-lg max-h-[80vh] flex flex-col">
+          <div className="bg-figma-bg rounded-lg w-full max-w-lg max-h-[80vh] flex flex-col">
             <div className="p-4 border-b border-figma-divider">
               <h2 className="text-sm font-medium text-figma-primary">Preview Changes</h2>
               <p className="text-xs text-figma-secondary mt-1">
                 {Object.keys(previewChanges.propertyChanges).length - excludedNodes.size} node{Object.keys(previewChanges.propertyChanges).length - excludedNodes.size === 1 ? "" : "s"} will be modified
                 {previewChanges.instancesSkipped > 0 && ` (${previewChanges.instancesSkipped} instances skipped)`}
               </p>
+              <div className="mt-3 relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <svg className="h-4 w-4 text-figma-secondary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </div>
+                <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search nodes by name..." className="w-full pl-10 pr-3 py-1.5 text-sm rounded-md border border-figma-border bg-figma-bg text-figma-primary placeholder:text-figma-secondary focus:border-figma-primary focus:outline-none transition-colors" />
+              </div>
             </div>
 
             <div className="overflow-y-auto p-4 space-y-4">
-              {Object.keys(previewChanges.propertyChanges).map((nodeId) => {
-                const node = previewChanges.propertyChanges[nodeId];
-                const isExcluded = excludedNodes.has(nodeId);
+              {Object.keys(previewChanges.propertyChanges)
+                .filter((nodeId) => {
+                  const node = previewChanges.propertyChanges[nodeId];
+                  return node.name.toLowerCase().includes(searchQuery.toLowerCase());
+                })
+                .map((nodeId) => {
+                  const node = previewChanges.propertyChanges[nodeId];
+                  const isExcluded = excludedNodes.has(nodeId);
 
-                return (
-                  <div key={nodeId} className={`rounded-md transition-colors ${isExcluded && "opacity-50"}`}>
-                    <div className="flex items-start gap-2">
-                      <button onClick={() => handleToggleNodeExclusion(nodeId)} className={`text-figma-secondary hover:text-figma-primary transition-colors w-fit ${isExcluded && "text-figma-primary"}`} title={isExcluded ? "Include node" : "Exclude node"}>
-                        {isExcluded ? <PlusCircledIcon className="size-4" /> : <MinusCircledIcon className="size-4" />}
-                      </button>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-medium text-figma-primary truncate">{node.name}</span>
-                          <span className="text-xs text-figma-secondary shrink-0">{node.type}</span>
-                        </div>
-                        <div className="mt-1.5 space-y-1">
-                          {node.changes.map((change, index) => (
-                            <div key={index} className="text-xs flex items-center justify-between gap-2">
-                              <span className="text-figma-secondary truncate">{change.property}</span>
-                              <div className="flex items-center gap-1.5 shrink-0 tabular-nums">
-                                <span className="text-figma-secondary">{formatChange(change.from)}</span>
-                                <span className="text-figma-secondary">→</span>
-                                <span className="text-figma-primary font-medium">{formatChange(change.to)}</span>
+                  return (
+                    <div key={nodeId} className={`rounded-md transition-colors ${isExcluded && "opacity-50"}`}>
+                      <div className="flex items-start gap-2">
+                        <button onClick={() => handleToggleNodeExclusion(nodeId)} className={`text-figma-secondary hover:text-figma-primary transition-colors w-fit ${isExcluded && "text-figma-primary"}`} title={isExcluded ? "Include node" : "Exclude node"}>
+                          {isExcluded ? <PlusCircledIcon className="size-4" /> : <MinusCircledIcon className="size-4" />}
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <button onClick={() => handleHighlightNode(nodeId)} className="text-xs font-medium text-figma-primary truncate hover:text-figma-blue focus:text-figma-blue transition-colors text-left" title="Click to highlight on canvas">
+                              {node.name}
+                            </button>
+                            <span className="text-xs text-figma-secondary shrink-0">{node.type}</span>
+                          </div>
+                          <div className="mt-1.5 space-y-1">
+                            {node.changes.map((change, index) => (
+                              <div key={index} className="text-xs flex items-center justify-between gap-2">
+                                <span className="text-figma-secondary truncate">{change.property}</span>
+                                <div className="flex items-center gap-1.5 shrink-0 tabular-nums">
+                                  <span className="text-figma-secondary">{formatChange(change.from)}</span>
+                                  <span className="text-figma-secondary">→</span>
+                                  <span className="text-figma-primary font-medium">{formatChange(change.to)}</span>
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
             </div>
 
-            <div className="p-4 border-t border-[#E5E5E5] flex justify-end space-x-2">
+            <div className="p-4 border-t border-figma-divider flex justify-end space-x-2">
               <button
-                onClick={() => setPreviewChanges(null)}
+                onClick={() => {
+                  removeHighlight();
+                  setPreviewChanges(null);
+                }}
                 className="px-3 py-1.5 text-sm font-medium rounded-md transition-colors
-                  bg-[#F5F5F5] text-[#333333] hover:bg-[#E5E5E5]"
+                  bg-figma-secondaryBg text-figma-primary hover:bg-figma-bg-selected"
               >
                 Cancel
               </button>
               <button
                 onClick={() => {
-                  const isSelectionOnly = previewChanges!.nodeCount === Object.keys(previewChanges!.propertyChanges).length;
-                  handleApply(isSelectionOnly);
+                  removeHighlight();
+                  handleApply(true);
                   setPreviewChanges(null);
                 }}
                 className="px-3 py-1.5 text-sm font-medium rounded-md transition-colors
-                  bg-[#18A0FB] text-white hover:bg-[#0D8DE3]"
+                  bg-figma-blue text-white hover:bg-figma-blue/90"
               >
                 Apply Changes
               </button>
@@ -473,7 +530,13 @@ function App() {
       {/* Progress Bar */}
       {(previewLoading || selectionLoading || documentLoading) && (
         <div className="progress-bar">
-          <div className="progress-bar-indicator w-1/2"></div>
+          <div className="progress-bar-indicator transition-all duration-300" style={{ width: `${progress * 100}%` }}>
+            <div className="absolute inset-0 flex items-center justify-center text-xs text-white">
+              {progressPhase === "analyzing" && "Analyzing..."}
+              {progressPhase === "processing" && `Processing ${Math.round(progress * 100)}%`}
+              {progressPhase === "complete" && "Complete!"}
+            </div>
+          </div>
         </div>
       )}
     </main>

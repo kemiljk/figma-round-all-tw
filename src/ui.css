@@ -152,11 +152,12 @@
 
 /* Progress bar styles */
 .progress-bar {
-  @apply absolute bottom-0 left-0 right-0 h-0.5 bg-figma-secondaryBg overflow-hidden;
+  @apply fixed bottom-0 left-0 right-0 h-6 bg-figma-bg border-t border-figma-border overflow-hidden;
 }
 
 .progress-bar-indicator {
-  @apply h-full bg-figma-blue transition-all duration-300;
+  @apply h-full bg-[#18A0FB] relative;
+  transition: width 300ms ease-in-out;
 }
 
 /* Stats panel styles */
