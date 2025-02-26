@@ -19,6 +19,8 @@ interface RoundingOptions {
     fontSize: number;
     effects: number;
     vectors: number;
+    lineHeight: number;
+    cornerRadius: number;
   };
 }
 
@@ -58,10 +60,12 @@ function App() {
     roundingStrategy: "round",
     closeOnComplete: false,
     roundingFactorByProperty: {
-      dimensions: 8,
-      fontSize: 2,
+      dimensions: 1,
+      fontSize: 1,
       effects: 1,
       vectors: 1,
+      lineHeight: 1,
+      cornerRadius: 1,
     },
   });
 
@@ -181,7 +185,7 @@ function App() {
   const handleSaveCustomPreset = () => {
     const currentValue = options.roundingFactorByProperty.dimensions;
     if (!customPresets.includes(currentValue)) {
-      const newPresets = [...customPresets, currentValue].sort((a, b) => b - a);
+      const newPresets = [...customPresets, currentValue];
       setCustomPresets(newPresets);
       parent.postMessage({ pluginMessage: { type: "save-custom-presets", presets: newPresets } }, "*");
     }
@@ -200,9 +204,11 @@ function App() {
       ...prev,
       roundingFactorByProperty: {
         dimensions: factor,
-        fontSize: Math.max(1, factor / 4),
-        effects: Math.max(1, factor / 8),
-        vectors: Math.max(1, factor / 8),
+        fontSize: 1,
+        effects: 1,
+        vectors: 1,
+        lineHeight: 1,
+        cornerRadius: 1,
       },
     }));
   };
@@ -292,28 +298,31 @@ function App() {
             <section className="space-y-2">
               <Label.Root className="text-xs font-medium text-figma-primary">Presets</Label.Root>
               <div className="grid grid-cols-3 gap-2">
-                {[...customPresets, 8, 4, 2].map((factor, index) => (
-                  <div key={`preset-${factor}-${index}`} className="relative group">
-                    <button
-                      onClick={() => handlePresetClick(factor)}
-                      className={`w-full px-3 py-1.5 text-sm font-medium rounded-md transition-colors
-                        ${options.roundingFactorByProperty.dimensions === factor ? "bg-figma-blue text-white hover:bg-figma-blue/90" : "bg-figma-secondaryBg text-figma-primary hover:bg-figma-bg-selected"}`}
-                    >
-                      {factor}px Grid
-                    </button>
-                    {customPresets.includes(factor) && (
+                {[1, 4, 8, ...customPresets]
+                  .filter((value, index, self) => self.indexOf(value) === index)
+                  .sort((a, b) => a - b)
+                  .map((factor, index) => (
+                    <div key={`preset-${factor}-${index}`} className="relative group">
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRemovePreset(factor);
-                        }}
-                        className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                        onClick={() => handlePresetClick(factor)}
+                        className={`w-full px-3 py-1.5 text-sm font-medium rounded-full transition-colors
+                        ${options.roundingFactorByProperty.dimensions === factor ? "bg-figma-blue text-white hover:bg-figma-blue/90" : "bg-figma-secondaryBg text-figma-primary hover:bg-figma-bg-selected"}`}
                       >
-                        <MinusCircledIcon className="w-3 h-3" />
+                        {factor}
                       </button>
-                    )}
-                  </div>
-                ))}
+                      {customPresets.includes(factor) && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemovePreset(factor);
+                          }}
+                          className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                        >
+                          <MinusCircledIcon className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
               </div>
             </section>
 
@@ -368,6 +377,8 @@ function App() {
             <section className="space-y-3">
               <Label.Root className="text-xs font-medium text-figma-primary">Property-Specific Factors</Label.Root>
               <Input label="Font Size Factor" value={options.roundingFactorByProperty.fontSize} onChange={(e) => handleFactorChange("fontSize", Number(e.target.value))} min={1} step={1} placeholder="2" />
+              <Input label="Line Height Factor" value={options.roundingFactorByProperty.lineHeight} onChange={(e) => handleFactorChange("lineHeight", Number(e.target.value))} min={1} step={1} placeholder="1" />
+              <Input label="Corner Radius Factor" value={options.roundingFactorByProperty.cornerRadius} onChange={(e) => handleFactorChange("cornerRadius", Number(e.target.value))} min={1} step={1} placeholder="1" />
               <Input label="Effects Factor" value={options.roundingFactorByProperty.effects} onChange={(e) => handleFactorChange("effects", Number(e.target.value))} min={1} step={1} placeholder="1" />
               <Input label="Vector Factor" value={options.roundingFactorByProperty.vectors} onChange={(e) => handleFactorChange("vectors", Number(e.target.value))} min={1} step={1} placeholder="1" />
             </section>

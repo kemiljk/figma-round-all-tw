@@ -15,6 +15,8 @@ interface RoundingOptions {
     fontSize: number;
     effects: number;
     vectors: number;
+    lineHeight: number;
+    cornerRadius: number;
     [key: string]: number;
   };
 }
@@ -39,10 +41,12 @@ const DEFAULT_OPTIONS: RoundingOptions = {
   roundingStrategy: "round",
   ignoreTypes: ["GROUP"],
   roundingFactorByProperty: {
-    dimensions: 8,
-    fontSize: 2,
+    dimensions: 1,
+    fontSize: 1,
     effects: 1,
     vectors: 1,
+    lineHeight: 1,
+    cornerRadius: 1,
   },
 };
 
@@ -291,16 +295,36 @@ function getChildren(node: SceneNode): SceneNode[] {
 
 // Helper functions for rounding strategies
 function applyRoundingStrategy(value: number, factor: number, strategy: RoundingStrategy = "round"): number {
+  // Handle edge cases
+  if (factor <= 0) return value;
+  if (value === 0) return 0;
+
+  // For very small values, preserve them
+  if (Math.abs(value) < 0.001) return value;
+
+  // Use more precise calculation to avoid floating point errors
   const scaled = value / factor;
+  let result;
+
   switch (strategy) {
     case "floor":
-      return Math.floor(scaled) * factor;
+      result = Math.floor(scaled) * factor;
+      break;
     case "ceil":
-      return Math.ceil(scaled) * factor;
+      result = Math.ceil(scaled) * factor;
+      break;
     case "round":
     default:
-      return Math.round(scaled) * factor;
+      // Use a more precise rounding approach
+      // This helps with cases like 60.48 becoming 59
+      const rounded = Math.round(scaled * 1000000) / 1000000;
+      result = Math.round(rounded) * factor;
+      break;
   }
+
+  // Prevent rounding errors by cleaning up the result
+  // This ensures values like 10.5 don't become 10 due to floating point precision
+  return Number(result.toFixed(10));
 }
 
 // Helper function to preserve proportions when rounding dimensions
@@ -387,11 +411,6 @@ async function previewRoundingChanges(roundingFactor: number, options: RoundingO
       return;
     }
 
-    // Skip vector nodes if roundVectors is disabled
-    if (!options.roundVectors && (node.type === "VECTOR" || node.type === "BOOLEAN_OPERATION" || node.type === "STAR" || node.type === "LINE" || node.type === "ELLIPSE" || node.type === "POLYGON")) {
-      return;
-    }
-
     // Skip instances if not detaching
     if (node.type === "INSTANCE" && !options.detachInstances) {
       changes.instancesSkipped++;
@@ -431,43 +450,38 @@ async function previewRoundingChanges(roundingFactor: number, options: RoundingO
 
     // Preview size properties
     if ("width" in node && "height" in node) {
-      // Skip resizing for vector nodes if roundVectors is disabled
-      if (!options.roundVectors && (node.type === "VECTOR" || node.type === "BOOLEAN_OPERATION" || node.type === "STAR" || node.type === "LINE" || node.type === "ELLIPSE" || node.type === "POLYGON")) {
-        // Skip resizing for vector types
+      if (options.preserveProportions) {
+        const [newWidth, newHeight] = preserveProportions(node.width, node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+        if (newWidth !== node.width) {
+          changes.propertyChanges[node.id].changes.push({
+            property: "width",
+            from: node.width,
+            to: newWidth,
+          });
+        }
+        if (newHeight !== node.height) {
+          changes.propertyChanges[node.id].changes.push({
+            property: "height",
+            from: node.height,
+            to: newHeight,
+          });
+        }
       } else {
-        if (options.preserveProportions) {
-          const [newWidth, newHeight] = preserveProportions(node.width, node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
-          if (newWidth !== node.width) {
-            changes.propertyChanges[node.id].changes.push({
-              property: "width",
-              from: node.width,
-              to: newWidth,
-            });
-          }
-          if (newHeight !== node.height) {
-            changes.propertyChanges[node.id].changes.push({
-              property: "height",
-              from: node.height,
-              to: newHeight,
-            });
-          }
-        } else {
-          const newWidth = applyRoundingStrategy(node.width, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
-          const newHeight = applyRoundingStrategy(node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
-          if (newWidth !== node.width) {
-            changes.propertyChanges[node.id].changes.push({
-              property: "width",
-              from: node.width,
-              to: newWidth,
-            });
-          }
-          if (newHeight !== node.height) {
-            changes.propertyChanges[node.id].changes.push({
-              property: "height",
-              from: node.height,
-              to: newHeight,
-            });
-          }
+        const newWidth = applyRoundingStrategy(node.width, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+        const newHeight = applyRoundingStrategy(node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+        if (newWidth !== node.width) {
+          changes.propertyChanges[node.id].changes.push({
+            property: "width",
+            from: node.width,
+            to: newWidth,
+          });
+        }
+        if (newHeight !== node.height) {
+          changes.propertyChanges[node.id].changes.push({
+            property: "height",
+            from: node.height,
+            to: newHeight,
+          });
         }
       }
     }
@@ -482,6 +496,52 @@ async function previewRoundingChanges(roundingFactor: number, options: RoundingO
             from: node.fontSize,
             to: newSize,
           });
+        }
+      }
+
+      // Preview line height
+      if (node.lineHeight && typeof node.lineHeight !== "symbol") {
+        if (node.lineHeight.unit === "PIXELS" && typeof node.lineHeight.value === "number") {
+          const newLineHeight = applyRoundingStrategy(node.lineHeight.value, options.roundingFactorByProperty.lineHeight || 1, options.roundingStrategy);
+          if (newLineHeight !== node.lineHeight.value) {
+            changes.propertyChanges[node.id].changes.push({
+              property: "lineHeight",
+              from: node.lineHeight.value,
+              to: newLineHeight,
+            });
+          }
+        } else if (node.lineHeight.unit === "PERCENT" && typeof node.lineHeight.value === "number") {
+          const newLineHeight = applyRoundingStrategy(node.lineHeight.value, options.roundingFactorByProperty.lineHeight || 1, options.roundingStrategy);
+          if (newLineHeight !== node.lineHeight.value) {
+            changes.propertyChanges[node.id].changes.push({
+              property: "lineHeight (%)",
+              from: node.lineHeight.value,
+              to: newLineHeight,
+            });
+          }
+        }
+      }
+
+      // Preview letter spacing
+      if (node.letterSpacing && typeof node.letterSpacing !== "symbol") {
+        if (node.letterSpacing.unit === "PIXELS" && typeof node.letterSpacing.value === "number") {
+          const newLetterSpacing = applyRoundingStrategy(node.letterSpacing.value, options.roundingFactorByProperty.fontSize || 1, options.roundingStrategy);
+          if (newLetterSpacing !== node.letterSpacing.value) {
+            changes.propertyChanges[node.id].changes.push({
+              property: "letterSpacing",
+              from: node.letterSpacing.value,
+              to: newLetterSpacing,
+            });
+          }
+        } else if (node.letterSpacing.unit === "PERCENT" && typeof node.letterSpacing.value === "number") {
+          const newLetterSpacing = applyRoundingStrategy(node.letterSpacing.value, options.roundingFactorByProperty.fontSize || 1, options.roundingStrategy);
+          if (newLetterSpacing !== node.letterSpacing.value) {
+            changes.propertyChanges[node.id].changes.push({
+              property: "letterSpacing (%)",
+              from: node.letterSpacing.value,
+              to: newLetterSpacing,
+            });
+          }
         }
       }
     }
@@ -504,11 +564,56 @@ async function previewRoundingChanges(roundingFactor: number, options: RoundingO
 
     // Preview corner radius
     if ("cornerRadius" in node && typeof node.cornerRadius === "number") {
-      const newRadius = applyRoundingStrategy(node.cornerRadius, roundingFactor, options.roundingStrategy);
+      const newRadius = applyRoundingStrategy(node.cornerRadius, options.roundingFactorByProperty.cornerRadius || roundingFactor, options.roundingStrategy);
       if (newRadius !== node.cornerRadius) {
         changes.propertyChanges[node.id].changes.push({
           property: "cornerRadius",
           from: node.cornerRadius,
+          to: newRadius,
+        });
+      }
+    }
+
+    // Preview individual corner radii
+    if ("topLeftRadius" in node && typeof node.topLeftRadius === "number") {
+      const newRadius = applyRoundingStrategy(node.topLeftRadius, options.roundingFactorByProperty.cornerRadius || roundingFactor, options.roundingStrategy);
+      if (newRadius !== node.topLeftRadius) {
+        changes.propertyChanges[node.id].changes.push({
+          property: "topLeftRadius",
+          from: node.topLeftRadius,
+          to: newRadius,
+        });
+      }
+    }
+
+    if ("topRightRadius" in node && typeof node.topRightRadius === "number") {
+      const newRadius = applyRoundingStrategy(node.topRightRadius, options.roundingFactorByProperty.cornerRadius || roundingFactor, options.roundingStrategy);
+      if (newRadius !== node.topRightRadius) {
+        changes.propertyChanges[node.id].changes.push({
+          property: "topRightRadius",
+          from: node.topRightRadius,
+          to: newRadius,
+        });
+      }
+    }
+
+    if ("bottomLeftRadius" in node && typeof node.bottomLeftRadius === "number") {
+      const newRadius = applyRoundingStrategy(node.bottomLeftRadius, options.roundingFactorByProperty.cornerRadius || roundingFactor, options.roundingStrategy);
+      if (newRadius !== node.bottomLeftRadius) {
+        changes.propertyChanges[node.id].changes.push({
+          property: "bottomLeftRadius",
+          from: node.bottomLeftRadius,
+          to: newRadius,
+        });
+      }
+    }
+
+    if ("bottomRightRadius" in node && typeof node.bottomRightRadius === "number") {
+      const newRadius = applyRoundingStrategy(node.bottomRightRadius, options.roundingFactorByProperty.cornerRadius || roundingFactor, options.roundingStrategy);
+      if (newRadius !== node.bottomRightRadius) {
+        changes.propertyChanges[node.id].changes.push({
+          property: "bottomRightRadius",
+          from: node.bottomRightRadius,
           to: newRadius,
         });
       }
@@ -575,12 +680,6 @@ async function processNodeProperties(node: SceneNode, roundingFactor: number, op
       return;
     }
 
-    // Skip vector nodes if roundVectors is disabled
-    if (!options.roundVectors && (node.type === "VECTOR" || node.type === "BOOLEAN_OPERATION" || node.type === "STAR" || node.type === "LINE" || node.type === "ELLIPSE" || node.type === "POLYGON")) {
-      console.log(`Skipping vector node "${node.name}" - Vector rounding is disabled`);
-      return;
-    }
-
     // Track stats
     stats.nodesProcessed++;
 
@@ -607,84 +706,79 @@ async function processNodeProperties(node: SceneNode, roundingFactor: number, op
 
     // Size properties with proportion preservation
     if ("resize" in node && "width" in node && "height" in node) {
-      // Skip resizing for vector nodes if roundVectors is disabled
-      if (!options.roundVectors && (node.type === "VECTOR" || node.type === "BOOLEAN_OPERATION" || node.type === "STAR" || node.type === "LINE" || node.type === "ELLIPSE" || node.type === "POLYGON")) {
-        // Skip resizing for vector types
-      } else {
-        // For text nodes, respect text auto-sizing settings
-        if (node.type === "TEXT") {
-          const textNode = node as TextNode;
-          // Only modify width if it's not in auto-width mode
-          if (!textNode.autoRename && textNode.textAutoResize !== "WIDTH_AND_HEIGHT" && textNode.textAutoResize !== "HEIGHT") {
-            const newWidth = applyRoundingStrategy(node.width, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
-            if (newWidth !== node.width) {
-              node.resize(newWidth, node.height);
-              stats.propertiesRounded++;
-              stats.modifiedProperties.add("width");
-            }
-          }
-          // Only modify height if it's in fixed height mode
-          if (textNode.textAutoResize === "NONE") {
-            const newHeight = applyRoundingStrategy(node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
-            if (newHeight !== node.height) {
-              node.resize(node.width, newHeight);
-              stats.propertiesRounded++;
-              stats.modifiedProperties.add("height");
-            }
+      // For text nodes, respect text auto-sizing settings
+      if (node.type === "TEXT") {
+        const textNode = node as TextNode;
+        // Only modify width if it's not in auto-width mode
+        if (!textNode.autoRename && textNode.textAutoResize !== "WIDTH_AND_HEIGHT" && textNode.textAutoResize !== "HEIGHT") {
+          const newWidth = applyRoundingStrategy(node.width, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+          if (newWidth !== node.width) {
+            node.resize(newWidth, node.height);
+            stats.propertiesRounded++;
+            stats.modifiedProperties.add("width");
           }
         }
-        // For auto layout containers, only modify fixed dimensions
-        else if (hasAutoLayout) {
-          const frame = node as FrameNode;
-          if (frame.primaryAxisSizingMode === "FIXED" && frame.layoutMode === "HORIZONTAL") {
-            const newWidth = applyRoundingStrategy(node.width, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
-            if (newWidth !== node.width) {
-              node.resize(newWidth, node.height);
-              stats.propertiesRounded++;
-              stats.modifiedProperties.add("width");
-            }
+        // Only modify height if it's in fixed height mode
+        if (textNode.textAutoResize === "NONE") {
+          const newHeight = applyRoundingStrategy(node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+          if (newHeight !== node.height) {
+            node.resize(node.width, newHeight);
+            stats.propertiesRounded++;
+            stats.modifiedProperties.add("height");
           }
-          if (frame.counterAxisSizingMode === "FIXED" && frame.layoutMode === "HORIZONTAL") {
-            const newHeight = applyRoundingStrategy(node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
-            if (newHeight !== node.height) {
-              node.resize(node.width, newHeight);
-              stats.propertiesRounded++;
-              stats.modifiedProperties.add("height");
-            }
+        }
+      }
+      // For auto layout containers, only modify fixed dimensions
+      else if (hasAutoLayout) {
+        const frame = node as FrameNode;
+        if (frame.primaryAxisSizingMode === "FIXED" && frame.layoutMode === "HORIZONTAL") {
+          const newWidth = applyRoundingStrategy(node.width, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+          if (newWidth !== node.width) {
+            node.resize(newWidth, node.height);
+            stats.propertiesRounded++;
+            stats.modifiedProperties.add("width");
           }
-          if (frame.primaryAxisSizingMode === "FIXED" && frame.layoutMode === "VERTICAL") {
-            const newHeight = applyRoundingStrategy(node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
-            if (newHeight !== node.height) {
-              node.resize(node.width, newHeight);
-              stats.propertiesRounded++;
-              stats.modifiedProperties.add("height");
-            }
+        }
+        if (frame.counterAxisSizingMode === "FIXED" && frame.layoutMode === "HORIZONTAL") {
+          const newHeight = applyRoundingStrategy(node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+          if (newHeight !== node.height) {
+            node.resize(node.width, newHeight);
+            stats.propertiesRounded++;
+            stats.modifiedProperties.add("height");
           }
-          if (frame.counterAxisSizingMode === "FIXED" && frame.layoutMode === "VERTICAL") {
-            const newWidth = applyRoundingStrategy(node.width, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
-            if (newWidth !== node.width) {
-              node.resize(newWidth, node.height);
-              stats.propertiesRounded++;
-              stats.modifiedProperties.add("width");
-            }
+        }
+        if (frame.primaryAxisSizingMode === "FIXED" && frame.layoutMode === "VERTICAL") {
+          const newHeight = applyRoundingStrategy(node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+          if (newHeight !== node.height) {
+            node.resize(node.width, newHeight);
+            stats.propertiesRounded++;
+            stats.modifiedProperties.add("height");
+          }
+        }
+        if (frame.counterAxisSizingMode === "FIXED" && frame.layoutMode === "VERTICAL") {
+          const newWidth = applyRoundingStrategy(node.width, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+          if (newWidth !== node.width) {
+            node.resize(newWidth, node.height);
+            stats.propertiesRounded++;
+            stats.modifiedProperties.add("width");
+          }
+        }
+      } else {
+        // For non-auto layout nodes, proceed with normal resizing
+        if (options.preserveProportions) {
+          const [newWidth, newHeight] = preserveProportions(node.width, node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+          if (newWidth !== node.width || newHeight !== node.height) {
+            node.resize(newWidth, newHeight);
+            stats.propertiesRounded += 2;
+            stats.modifiedProperties.add("dimensions");
           }
         } else {
-          // For non-auto layout nodes, proceed with normal resizing
-          if (options.preserveProportions) {
-            const [newWidth, newHeight] = preserveProportions(node.width, node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
-            if (newWidth !== node.width || newHeight !== node.height) {
-              node.resize(newWidth, newHeight);
-              stats.propertiesRounded += 2;
-              stats.modifiedProperties.add("dimensions");
-            }
-          } else {
-            const newWidth = applyRoundingStrategy(node.width, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
-            const newHeight = applyRoundingStrategy(node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
-            if (newWidth !== node.width || newHeight !== node.height) {
-              node.resize(newWidth, newHeight);
-              stats.propertiesRounded += 2;
-              stats.modifiedProperties.add("dimensions");
-            }
+          const newWidth = applyRoundingStrategy(node.width, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+          const newHeight = applyRoundingStrategy(node.height, options.roundingFactorByProperty.dimensions, options.roundingStrategy);
+          if (newWidth !== node.width || newHeight !== node.height) {
+            node.resize(newWidth, newHeight);
+            stats.propertiesRounded += 2;
+            stats.modifiedProperties.add("dimensions");
           }
         }
       }
@@ -774,7 +868,44 @@ async function processNodeProperties(node: SceneNode, roundingFactor: number, op
         }
       }
 
-      // ... similar updates for other text properties ...
+      // Add line height handling
+      if (node.lineHeight && typeof node.lineHeight !== "symbol") {
+        if (node.lineHeight.unit === "PIXELS" && typeof node.lineHeight.value === "number") {
+          const newLineHeight = applyRoundingStrategy(node.lineHeight.value, options.roundingFactorByProperty.lineHeight || 1, options.roundingStrategy);
+          if (newLineHeight !== node.lineHeight.value) {
+            node.lineHeight = { unit: "PIXELS", value: newLineHeight };
+            stats.propertiesRounded++;
+            stats.modifiedProperties.add("lineHeight");
+          }
+        } else if (node.lineHeight.unit === "PERCENT" && typeof node.lineHeight.value === "number") {
+          // For percentage line heights, round to nearest whole percent
+          const newLineHeight = applyRoundingStrategy(node.lineHeight.value, options.roundingFactorByProperty.lineHeight || 1, options.roundingStrategy);
+          if (newLineHeight !== node.lineHeight.value) {
+            node.lineHeight = { unit: "PERCENT", value: newLineHeight };
+            stats.propertiesRounded++;
+            stats.modifiedProperties.add("lineHeight");
+          }
+        }
+      }
+
+      // Add letter spacing handling
+      if (node.letterSpacing && typeof node.letterSpacing !== "symbol") {
+        if (node.letterSpacing.unit === "PIXELS" && typeof node.letterSpacing.value === "number") {
+          const newLetterSpacing = applyRoundingStrategy(node.letterSpacing.value, options.roundingFactorByProperty.fontSize || 1, options.roundingStrategy);
+          if (newLetterSpacing !== node.letterSpacing.value) {
+            node.letterSpacing = { unit: "PIXELS", value: newLetterSpacing };
+            stats.propertiesRounded++;
+            stats.modifiedProperties.add("letterSpacing");
+          }
+        } else if (node.letterSpacing.unit === "PERCENT" && typeof node.letterSpacing.value === "number") {
+          const newLetterSpacing = applyRoundingStrategy(node.letterSpacing.value, options.roundingFactorByProperty.fontSize || 1, options.roundingStrategy);
+          if (newLetterSpacing !== node.letterSpacing.value) {
+            node.letterSpacing = { unit: "PERCENT", value: newLetterSpacing };
+            stats.propertiesRounded++;
+            stats.modifiedProperties.add("letterSpacing");
+          }
+        }
+      }
     }
 
     // Vector properties
@@ -823,7 +954,51 @@ async function processNodeProperties(node: SceneNode, roundingFactor: number, op
       }
     }
 
-    // ... continue with other property updates using the new options ...
+    // Add corner radius handling for rectangles, frames, and components
+    if ("cornerRadius" in node && typeof node.cornerRadius === "number") {
+      const newRadius = applyRoundingStrategy(node.cornerRadius, options.roundingFactorByProperty.cornerRadius || roundingFactor, options.roundingStrategy);
+      if (newRadius !== node.cornerRadius) {
+        // Use setCornerRadius method if available
+        if ("setCornerRadius" in node && typeof node.setCornerRadius === "function") {
+          node.setCornerRadius(newRadius);
+          stats.propertiesRounded++;
+          stats.modifiedProperties.add("cornerRadius");
+        } else if (node.type === "RECTANGLE" || node.type === "ELLIPSE" || node.type === "POLYGON" || node.type === "STAR") {
+          // For these node types, we can set cornerRadius directly
+          (node as any).cornerRadius = newRadius;
+          stats.propertiesRounded++;
+          stats.modifiedProperties.add("cornerRadius");
+        }
+      }
+    }
+
+    // Handle individual corner radii if they exist
+    if ("topLeftRadius" in node && typeof node.topLeftRadius === "number") {
+      const newRadius = applyRoundingStrategy(node.topLeftRadius, options.roundingFactorByProperty.cornerRadius || roundingFactor, options.roundingStrategy);
+      if (newRadius !== node.topLeftRadius) {
+        // Use setCornerRadii method if available
+        if ("setCornerRadii" in node && typeof node.setCornerRadii === "function") {
+          node.setCornerRadii([newRadius, node.topRightRadius || 0, node.bottomRightRadius || 0, node.bottomLeftRadius || 0]);
+          stats.propertiesRounded++;
+          stats.modifiedProperties.add("topLeftRadius");
+        }
+      }
+    } else if (("topRightRadius" in node && typeof node.topRightRadius === "number") || ("bottomRightRadius" in node && typeof node.bottomRightRadius === "number") || ("bottomLeftRadius" in node && typeof node.bottomLeftRadius === "number")) {
+      // If any of the individual corner radii exist, set them all at once
+      if ("setCornerRadii" in node && typeof node.setCornerRadii === "function") {
+        const topLeft = "topLeftRadius" in node ? applyRoundingStrategy(node.topLeftRadius as number, options.roundingFactorByProperty.cornerRadius || roundingFactor, options.roundingStrategy) : 0;
+        const topRight = "topRightRadius" in node ? applyRoundingStrategy(node.topRightRadius as number, options.roundingFactorByProperty.cornerRadius || roundingFactor, options.roundingStrategy) : 0;
+        const bottomRight = "bottomRightRadius" in node ? applyRoundingStrategy(node.bottomRightRadius as number, options.roundingFactorByProperty.cornerRadius || roundingFactor, options.roundingStrategy) : 0;
+        const bottomLeft = "bottomLeftRadius" in node ? applyRoundingStrategy(node.bottomLeftRadius as number, options.roundingFactorByProperty.cornerRadius || roundingFactor, options.roundingStrategy) : 0;
+
+        // Only set if any value changed
+        if (topLeft !== (node.topLeftRadius || 0) || topRight !== (node.topRightRadius || 0) || bottomRight !== (node.bottomRightRadius || 0) || bottomLeft !== (node.bottomLeftRadius || 0)) {
+          node.setCornerRadii([topLeft, topRight, bottomRight, bottomLeft]);
+          stats.propertiesRounded++;
+          stats.modifiedProperties.add("cornerRadii");
+        }
+      }
+    }
   } catch (error) {
     console.error(`Error processing properties for node "${node.name}":`, error);
     stats.errorCount++;
